@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Calculator</title>
+    <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
+    <style>
+        :root { --bg: #121212; --text: #fff; --primary: #333; --accent: #ff9f0a; --danger: #ff453a; }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, sans-serif; }
+        body { background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+        .hidden { display: none !important; }
+        
+        /* Calculator UI */
+        #calculator { display: flex; flex-direction: column; height: 100%; padding: 20px; }
+        #calc-display { flex: 1; display: flex; justify-content: flex-end; align-items: flex-end; font-size: 4rem; padding-bottom: 20px; word-break: break-all; }
+        .keypad { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; padding-bottom: 20px; }
+        .btn { background: #333; border: none; border-radius: 50%; color: white; font-size: 1.5rem; height: 70px; display: flex; justify-content: center; align-items: center; cursor: pointer; }
+        .btn.op { background: var(--accent); }
+        .btn.sys { background: #a5a5a5; color: black; }
+
+        /* App UI */
+        #app-container { display: flex; flex-direction: column; height: 100%; }
+        .header { padding: 15px; background: #1e1e1e; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; }
+        .danger-btn { background: var(--danger); color: white; border: none; padding: 8px 12px; border-radius: 5px; cursor: pointer; font-weight: bold; }
+        
+        #vault-screen, #chat-screen { flex: 1; display: flex; flex-direction: column; overflow-y: auto; padding: 15px; }
+        .contact { background: #2c2c2c; padding: 15px; border-radius: 10px; margin-bottom: 10px; cursor: pointer; }
+        
+        .chat-history { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding-bottom: 10px; }
+        .msg { padding: 10px 15px; border-radius: 15px; max-width: 80%; word-wrap: break-word; }
+        .msg.sent { background: #0b84ff; align-self: flex-end; border-bottom-right-radius: 2px; }
+        .msg.recv { background: #3a3a3c; align-self: flex-start; border-bottom-left-radius: 2px; }
+        .msg img { max-width: 100%; border-radius: 10px; margin-top: 5px; }
+        
+        .input-area { display: flex; gap: 10px; padding: 10px; background: #1e1e1e; }
+        .input-area input[type="text"] { flex: 1; padding: 12px; border-radius: 20px; border: none; background: #3a3a3c; color: white; outline: none; }
+        .input-area button { background: #0b84ff; border: none; padding: 0 20px; border-radius: 20px; color: white; cursor: pointer; }
+        .file-btn { background: #3a3a3c !important; border-radius: 50% !important; width: 40px; padding: 0 !important; }
+    </style>
+</head>
+<body>
+
+    <!-- STEALTH UI: Calculator -->
+    <div id="calculator">
+        <div id="calc-display">0</div>
+        <div class="keypad">
+            <button class="btn sys" onclick="calcInput('AC')">AC</button>
+            <button class="btn sys" onclick="calcInput('+/-')">+/-</button>
+            <button class="btn sys" onclick="calcInput('%')">%</button>
+            <button class="btn op" onclick="calcInput('/')">÷</button>
+            <button class="btn" onclick="calcInput('7')">7</button>
+            <button class="btn" onclick="calcInput('8')">8</button>
+            <button class="btn" onclick="calcInput('9')">9</button>
+            <button class="btn op" onclick="calcInput('*')">×</button>
+            <button class="btn" onclick="calcInput('4')">4</button>
+            <button class="btn" onclick="calcInput('5')">5</button>
+            <button class="btn" onclick="calcInput('6')">6</button>
+            <button class="btn op" onclick="calcInput('-')">-</button>
+            <button class="btn" onclick="calcInput('1')">1</button>
+            <button class="btn" onclick="calcInput('2')">2</button>
+            <button class="btn" onclick="calcInput('3')">3</button>
+            <button class="btn op" onclick="calcInput('+')">+</button>
+            <button class="btn" onclick="calcInput('0')" style="grid-column: span 2; border-radius: 35px;">0</button>
+            <button class="btn" onclick="calcInput('.')">.</button>
+            <button class="btn op" onclick="calcInput('=')">=</button>
+        </div>
+    </div>
+
+    <!-- VAULT & CHAT UI -->
+    <div id="app-container" class="hidden">
+        <div class="header">
+            <span id="header-title">Vault</span>
+            <button class="danger-btn" onclick="panicWipe()">Clear All</button>
+        </div>
+        
+        <div id="vault-screen">
+            <h3 style="margin-bottom: 15px;">Secure Contacts</h3>
+            <div id="contact-list" class="contact" onclick="unlockChat()">
+                <strong>Peer Connection</strong>
+                <p id="peer-status" style="font-size: 0.8rem; color: #aaa;">Status: Disconnected</p>
+            </div>
+        </div>
+
+        <div id="chat-screen" class="hidden">
+            <div class="chat-history" id="chat-history"></div>
+            <div class="input-area">
+                <button class="file-btn" onclick="document.getElementById('file-input').click()">+</button>
+                <input type="file" id="file-input" accept="image/*" class="hidden" onchange="handleImage(event)">
+                <input type="text" id="msg-input" placeholder="Message..." onkeypress="if(event.key==='Enter') sendMsg()">
+                <button onclick="sendMsg()">Send</button>
+            </div>
+        </div>
+    </div>
+
+<script>
+/** 
+ * CONFIGURATION & URL PARSING
+ * Auto-configures parameters and strips URL for stealth.
+ */
+const urlParams = new URLSearchParams(window.location.search);
+const params = {
+    me: urlParams.get('me') || localStorage.getItem('me_id'),
+    peer: urlParams.get('peer') || localStorage.getItem('peer_id'),
+    calcPin: urlParams.get('calc') || localStorage.getItem('calc_pin') || '7860',
+    chatKey: urlParams.get('key') || localStorage.getItem('chat_key')
+};
+
+if (urlParams.has('me')) {
+    localStorage.setItem('me_id', params.me);
+    localStorage.setItem('peer_id', params.peer);
+    localStorage.setItem('calc_pin', params.calcPin);
+    if(params.chatKey) localStorage.setItem('chat_key', params.chatKey);
+    window.history.replaceState({}, document.title, window.location.pathname); // Strip URL
+}
+
+let peer, conn, cryptoKey;
+let db;
+
+/** 
+ * UI STATE MANAGEMENT
+ */
+let calcBuffer = '';
+function calcInput(val) {
+    if (val === 'AC') { calcBuffer = ''; document.getElementById('calc-display').innerText = '0'; return; }
+    if (val === '=') {
+        if (calcBuffer === params.calcPin) return revealVault();
+        try { calcBuffer = eval(calcBuffer).toString(); } catch(e) { calcBuffer = 'Error'; }
+        document.getElementById('calc-display').innerText = calcBuffer;
+        return;
+    }
+    calcBuffer += val;
+    document.getElementById('calc-display').innerText = calcBuffer;
+}
+
+function revealVault() {
+    document.getElementById('calculator').classList.add('hidden');
+    document.getElementById('app-container').classList.remove('hidden');
+    initDB().then(() => initPeer());
+}
+
+async function unlockChat() {
+    let pwd = params.chatKey;
+    if (!pwd) {
+        pwd = prompt("Enter Chat Password:");
+        if (!pwd) return;
+    }
+    await deriveCryptoKey(pwd);
+    document.getElementById('vault-screen').classList.add('hidden');
+    document.getElementById('chat-screen').classList.remove('hidden');
+    document.getElementById('header-title').innerText = "Chat";
+    loadMessages();
+}
+
+/** 
+ * CRYPTOGRAPHY (Web Crypto API - AES-GCM)
+ */
+async function deriveCryptoKey(password) {
+    const enc = new TextEncoder();
+    const keyMaterial = await crypto.subtle.importKey(
+        "raw", enc.encode(password), { name: "PBKDF2" }, false, ["deriveKey"]
+    );
+    cryptoKey = await crypto.subtle.deriveKey(
+        { name: "PBKDF2", salt: enc.encode("static-salt-p2p"), iterations: 100000, hash: "SHA-256" },
+        keyMaterial, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]
+    );
+}
+
+async function encryptData(text) {
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const encoded = new TextEncoder().encode(text);
+    const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv: iv }, cryptoKey, encoded);
+    return { iv: Array.from(iv), data: Array.from(new Uint8Array(ciphertext)) };
+}
+
+async function decryptData(payload) {
+    const iv = new Uint8Array(payload.iv);
+    const ciphertext = new Uint8Array(payload.data);
+    const decrypted = await crypto.subtle.decrypt({ name: "AES-GCM", iv: iv }, cryptoKey, ciphertext);
+    return new TextDecoder().decode(decrypted);
+}
+
+/** 
+ * PEERJS (WebRTC P2P)
+ */
+function initPeer() {
+    if (!params.me) return;
+    peer = new Peer(params.me);
+    
+    peer.on('open', () => {
+        document.getElementById('peer-status').innerText = `Listening as ${params.me}`;
+        if (params.peer) connectToPeer();
+    });
+
+    peer.on('connection', c => {
+        conn = c; setupConnection();
+    });
+}
+
+function connectToPeer() {
+    document.getElementById('peer-status').innerText = `Connecting to ${params.peer}...`;
+    conn = peer.connect(params.peer);
+    conn.on('open', setupConnection);
+}
+
+function setupConnection() {
+    document.getElementById('peer-status').innerText = "Connected (E2EE Active)";
+    document.getElementById('peer-status').style.color = "#32d74b";
+    
+    conn.on('data', async (data) => {
+        if (!cryptoKey) return; // Wait until unlocked
+        try {
+            const dec = await decryptData(data);
+            const msgObj = JSON.parse(dec);
+            renderMessage(msgObj, 'recv');
+            saveMessage(msgObj);
+        } catch (e) { console.error("Decryption failed", e); }
+    });
+}
+
+/** 
+ * MESSAGING & EXIF STRIPPING
+ */
+async function sendMsg() {
+    const input = document.getElementById('msg-input');
+    const text = input.value.trim();
+    if (!text || !conn || !conn.open) return;
+    
+    const msgObj = { id: Date.now(), type: 'text', content: text, sender: 'me' };
+    await transmitAndStore(msgObj);
+    input.value = '';
+}
+
+function handleImage(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    // EXIF Stripping via Canvas
+    const img = new Image();
+    const reader = new FileReader();
+    reader.onload = (event) => {
+        img.onload = async () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width; canvas.height = img.height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            
+            // Re-encode to remove EXIF
+            const cleanDataUrl = canvas.toDataURL('image/jpeg', 0.8);
+            const msgObj = { id: Date.now(), type: 'image', content: cleanDataUrl, sender: 'me' };
+            await transmitAndStore(msgObj);
+        };
+        img.src = event.target.result;
+    };
+    reader.readAsDataURL(file);
+}
+
+async function transmitAndStore(msgObj) {
+    renderMessage(msgObj, 'sent');
+    saveMessage(msgObj);
+    
+    // Prepare for network (change sender perspective)
+    const netObj = { ...msgObj, sender: 'peer' };
+    const enc = await encryptData(JSON.stringify(netObj));
+    conn.send(enc);
+}
+
+function renderMessage(msgObj, cls) {
+    const box = document.getElementById('chat-history');
+    const div = document.createElement('div');
+    div.className = `msg ${cls}`;
+    if (msgObj.type === 'text') {
+        div.innerText = msgObj.content;
+    } else if (msgObj.type === 'image') {
+        const img = document.createElement('img');
+        img.src = msgObj.content;
+        div.appendChild(img);
+    }
+    box.appendChild(div);
+    box.scrollTop = box.scrollHeight;
+}
+
+/** 
+ * INDEXEDDB (Local Storage)
+ */
+function initDB() {
+    return new Promise((resolve) => {
+        const req = indexedDB.open('VaultDB', 1);
+        req.onupgradeneeded = e => {
+            const db = e.target.result;
+            if (!db.objectStoreNames.contains('messages')) {
+                db.createObjectStore('messages', { keyPath: 'id' });
+            }
+        };
+        req.onsuccess = e => { db = e.target.result; resolve(); };
+    });
+}
+
+function saveMessage(msg) {
+    const tx = db.transaction('messages', 'readwrite');
+    tx.objectStore('messages').put(msg);
+}
+
+function loadMessages() {
+    const tx = db.transaction('messages', 'readonly');
+    const store = tx.objectStore('messages');
+    const req = store.getAll();
+    req.onsuccess = () => {
+        document.getElementById('chat-history').innerHTML = '';
+        req.result.forEach(msg => renderMessage(msg, msg.sender === 'me' ? 'sent' : 'recv'));
+    };
+}
+
+function panicWipe() {
+    if(confirm("Wipe ALL local data? This cannot be undone.")) {
+        indexedDB.deleteDatabase('VaultDB');
+        localStorage.clear();
+        location.reload();
+    }
+}
+</script>
+</body>
+</html>
